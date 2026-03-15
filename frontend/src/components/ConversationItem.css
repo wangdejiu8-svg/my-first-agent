@@ -1,0 +1,20 @@
+.conversation-item {
+  padding: 12px;
+  margin: 4px 0;
+  cursor: pointer;
+  background: transparent;
+  border-radius: 6px;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.conversation-item:hover {
+  background: var(--bg-secondary);
+}
+
+.conversation-item-title {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 400;
+}

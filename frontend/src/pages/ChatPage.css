@@ -1,0 +1,6 @@
+.chat-page {
+  display: flex;
+  height: 100vh;
+  position: relative;
+  z-index: 1;
+}
