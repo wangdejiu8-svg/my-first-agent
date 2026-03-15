@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { mockApi } from '../services/mockApi';
 import './ChatArea.css';
 
 function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!isLoggedIn) {
       setShowLoginPrompt(true);
       setTimeout(() => setShowLoginPrompt(false), 3000);
@@ -15,11 +17,15 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
     }
     if (!input.trim()) return;
 
-    setMessages([...messages,
-      { role: 'user', content: input },
-      { role: 'ai', content: '这是 AI 的回复示例。' }
-    ]);
+    const userMessage = { role: 'user', content: input };
+    setMessages([...messages, userMessage]);
     setInput('');
+    setIsLoading(true);
+
+    // 模拟 AI 回复
+    const response = await mockApi.sendMessage(1, input);
+    setMessages(prev => [...prev, response.data]);
+    setIsLoading(false);
   };
 
   return (
@@ -58,6 +64,13 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
               </div>
             </div>
           ))
+        )}
+        {isLoading && (
+          <div className="message ai">
+            <div className="message-content">
+              <span>正在输入...</span>
+            </div>
+          </div>
         )}
       </div>
 

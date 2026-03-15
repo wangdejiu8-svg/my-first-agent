@@ -71,7 +71,9 @@ function RegisterPage() {
               required
             />
           </div>
-          <button className="submit-btn" type="submit">注册</button>
+          <button className="submit-btn" type="submit">
+            <span className="submit-btn-inner">注册</span>
+          </button>
         </form>
         <div className="auth-link">
           已有账号？<a href="/login">去登录</a>

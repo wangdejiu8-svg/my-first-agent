@@ -1,16 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { mockApi } from '../services/mockApi';
 import './Sidebar.css';
 
 function Sidebar({ isLoggedIn, onLogout }) {
   const navigate = useNavigate();
-  const [conversations, setConversations] = useState([
-    { id: 1, title: '如何学习 React？' },
-    { id: 2, title: 'Python 数据分析' }
-  ]);
+  const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(1);
   const [showMenu, setShowMenu] = useState(false);
+
+  useEffect(() => {
+    // 加载对话列表
+    mockApi.getConversations().then(res => {
+      setConversations(res.data);
+    });
+  }, []);
+
+  const handleNewConversation = () => {
+    mockApi.createConversation('新对话').then(res => {
+      setConversations([res.data, ...conversations]);
+      setActiveConvId(res.data.id);
+    });
+  };
 
   return (
     <motion.div
@@ -21,7 +33,7 @@ function Sidebar({ isLoggedIn, onLogout }) {
       transition={{ type: 'spring', damping: 25 }}
     >
       <div style={{ padding: '16px' }}>
-        <button style={{
+        <button onClick={handleNewConversation} style={{
           width: '100%',
           padding: '10px 12px',
           background: 'var(--accent-primary)',

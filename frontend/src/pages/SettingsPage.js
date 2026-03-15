@@ -24,7 +24,13 @@ function SettingsPage() {
         animate={{ opacity: 1, y: 0 }}
       >
         <button className="back-btn" onClick={() => navigate('/')}>
-          ← 返回
+          <div className="back-btn-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" height="25px" width="25px">
+              <path d="M224 480h640a32 32 0 1 1 0 64H224a32 32 0 0 1 0-64z" fill="#000000"></path>
+              <path d="m237.248 512 265.408 265.344a32 32 0 0 1-45.312 45.312l-288-288a32 32 0 0 1 0-45.312l288-288a32 32 0 1 1 45.312 45.312L237.248 512z" fill="#000000"></path>
+            </svg>
+          </div>
+          <span className="back-btn-text">返回</span>
         </button>
         <h1 className="settings-title">设置</h1>
 

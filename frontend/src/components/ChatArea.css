@@ -130,7 +130,6 @@
 .input-area {
   padding: 20px;
   background: var(--bg-primary);
-  border-top: 1px solid var(--border-color);
 }
 
 .input-wrapper {
@@ -138,9 +137,9 @@
   max-width: 768px;
   margin: 0 auto;
   border-radius: 12px;
-  box-shadow: 0 0 0 1px var(--border-color);
   background: var(--bg-secondary);
   transition: all 0.2s;
+  box-shadow: 0 0 0 1px var(--border-color);
 }
 
 .input-wrapper:focus-within {
@@ -174,7 +173,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid var(--border-color);
 }
 
 .input-controls-left {

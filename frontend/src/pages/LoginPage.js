@@ -42,7 +42,9 @@ function LoginPage() {
               required
             />
           </div>
-          <button className="submit-btn" type="submit">登录</button>
+          <button className="submit-btn" type="submit">
+            <span className="submit-btn-inner">登录</span>
+          </button>
         </form>
         <div className="auth-link">
           还没有账号？<a href="/register">去注册</a>
