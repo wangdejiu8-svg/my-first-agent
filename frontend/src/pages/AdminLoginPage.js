@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { useAuth } from '../contexts/AuthContext';
+import { authApi } from '../services/authApi';
 import './AuthPage.css';
 
-function LoginPage() {
+function AdminLoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -17,10 +16,10 @@ function LoginPage() {
     setError('');
     setIsSubmitting(true);
     try {
-      await login(formData);
-      navigate('/');
+      await authApi.adminLogin(formData);
+      navigate('/admin');
     } catch (err) {
-      setError(err.message || '登录失败，请检查账号和密码');
+      setError(err.message || '管理员登录失败');
     } finally {
       setIsSubmitting(false);
     }
@@ -28,24 +27,12 @@ function LoginPage() {
 
   return (
     <div className="auth-page">
-      <motion.div
-        className="auth-card"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45 }}
-      >
-        <h1 className="auth-title">登录</h1>
+      <motion.div className="auth-card" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }}>
+        <h1 className="auth-title">管理员登录</h1>
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label">用户名或邮箱</label>
-            <input
-              className="form-input"
-              type="text"
-              autoComplete="username"
-              value={formData.username}
-              onChange={e => setFormData({ ...formData, username: e.target.value })}
-              required
-            />
+            <input className="form-input" value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} required />
           </div>
           <div className="form-group">
             <label className="form-label">密码</label>
@@ -85,12 +72,9 @@ function LoginPage() {
             <span className="submit-btn-inner">{isSubmitting ? '登录中...' : '登录'}</span>
           </button>
         </form>
-        <div className="auth-link">
-          还没有账号？<Link to="/register">去注册</Link>
-        </div>
       </motion.div>
     </div>
   );
 }
 
-export default LoginPage;
+export default AdminLoginPage;
