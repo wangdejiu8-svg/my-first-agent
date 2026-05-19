@@ -4,11 +4,17 @@ frontend/node_modules/
 
 # Production
 frontend/build/
+backend/.venv/
+backend/db.sqlite3
+backend/media/
+backend/.env
 
 # Misc
 .DS_Store
 *.log
 npm-debug.log*
+__pycache__/
+*.py[cod]
 
 # IDE
 .vscode/
