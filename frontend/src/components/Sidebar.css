@@ -7,3 +7,271 @@
   flex-direction: column;
   position: relative;
 }
+
+.sidebar-header {
+  padding: 16px;
+}
+
+.sidebar-divider {
+  height: 1px;
+  margin: 0 16px 8px;
+  background: var(--border-color);
+}
+
+.sidebar-note {
+  padding: 0 16px 8px;
+  color: rgba(17, 24, 39, 0.55);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.new-conversation-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.new-conversation-btn:hover {
+  background: var(--accent-hover);
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px 8px;
+}
+
+.conversation-empty {
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.conversation-row {
+  width: 100%;
+  padding: 12px;
+  margin: 4px 0;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.conversation-row:hover {
+  background: rgba(16, 163, 127, 0.05);
+}
+
+.conversation-row.active {
+  background: rgba(16, 163, 127, 0.1);
+  color: var(--accent-primary);
+}
+
+.conversation-row span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.conversation-context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 132px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.conversation-context-menu button {
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.conversation-context-menu button:hover {
+  background: var(--bg-tertiary);
+}
+
+.conversation-context-menu button.danger {
+  color: #ef4444;
+}
+
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.login-entry-btn {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--accent-primary);
+  border-radius: 6px;
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.login-entry-btn:hover {
+  background: rgba(16, 163, 127, 0.05);
+}
+
+.user-menu-wrap {
+  position: relative;
+}
+
+.user-menu-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.user-menu-trigger:hover {
+  background: var(--bg-tertiary);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  font-size: 14px;
+  color: white;
+}
+
+.user-menu {
+  position: absolute;
+  bottom: 48px;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px var(--shadow-soft);
+}
+
+.user-menu button {
+  width: 100%;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.user-menu button:hover {
+  background: var(--bg-tertiary);
+}
+
+.user-menu button.danger {
+  color: #ef4444;
+}
+
+.delete-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.delete-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.delete-dialog-title {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.delete-dialog-message {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.delete-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.delete-dialog-actions button {
+  min-width: 72px;
+  height: 34px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.delete-dialog-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.delete-dialog-cancel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.delete-dialog-cancel:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.delete-dialog-confirm {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: white;
+}
+
+.delete-dialog-confirm:hover:not(:disabled) {
+  background: #dc2626;
+}

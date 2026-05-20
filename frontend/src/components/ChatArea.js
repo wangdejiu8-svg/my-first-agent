@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { mockApi } from '../services/mockApi';
+import { API_BASE_URL } from '../services/apiClient';
 import './ChatArea.css';
 
-function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
-  const [messages, setMessages] = useState([]);
+function ChatArea({
+  sidebarVisible,
+  onToggleSidebar,
+  isLoggedIn,
+  messages,
+  error,
+  isLoading,
+  onSendMessage,
+}) {
   const [input, setInput] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const handleSend = async () => {
     if (!isLoggedIn) {
@@ -15,17 +23,57 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
       setTimeout(() => setShowLoginPrompt(false), 3000);
       return;
     }
-    if (!input.trim()) return;
 
-    const userMessage = { role: 'user', content: input };
-    setMessages([...messages, userMessage]);
+    const content = input.trim();
+    if ((!content && selectedFiles.length === 0) || isLoading) return;
+
+    const filesToSend = selectedFiles;
+    const messageContent = content || `上传了 ${filesToSend.length} 个文件`;
+
     setInput('');
-    setIsLoading(true);
+    setSelectedFiles([]);
 
-    // 模拟 AI 回复
-    const response = await mockApi.sendMessage(1, input);
-    setMessages(prev => [...prev, response.data]);
-    setIsLoading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    try {
+      await onSendMessage(messageContent, filesToSend);
+    } catch (err) {
+      setInput(content);
+      setSelectedFiles(filesToSend);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    setSelectedFiles(prev => {
+      const existingKeys = new Set(prev.map(file => `${file.name}-${file.size}-${file.lastModified}`));
+      const nextFiles = files.filter(file => !existingKeys.has(`${file.name}-${file.size}-${file.lastModified}`));
+      return [...prev, ...nextFiles];
+    });
+
+    event.target.value = '';
+  };
+
+  const removeSelectedFile = (indexToRemove) => {
+    setSelectedFiles(prev => prev.filter((_file, index) => index !== indexToRemove));
+  };
+
+  const formatFileSize = (size) => {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const getAttachmentUrl = (fileUrl) => {
+    if (!fileUrl) return '#';
+    if (/^https?:\/\//i.test(fileUrl)) return fileUrl;
+    const baseUrl = API_BASE_URL.replace(/\/api\/?$/, '');
+    const normalizedPath = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+    return `${baseUrl}${normalizedPath}`;
   };
 
   return (
@@ -36,34 +84,38 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
       <div className="messages-container">
         {messages.length === 0 ? (
           <div className="welcome-message">
-            <h1>有什么我能帮你的吗？</h1>
-            <div className="prompt-cards">
-              <div className="prompt-card" onClick={() => setInput('帮我写一封邮件')}>
-                <span>✉️</span>
-                <p>帮我写一封邮件</p>
-              </div>
-              <div className="prompt-card" onClick={() => setInput('解释量子力学')}>
-                <span>🔬</span>
-                <p>解释量子力学</p>
-              </div>
-              <div className="prompt-card" onClick={() => setInput('帮我写段Python代码')}>
-                <span>💻</span>
-                <p>帮我写段Python代码</p>
-              </div>
-              <div className="prompt-card" onClick={() => setInput('推荐一本好书')}>
-                <span>📚</span>
-                <p>推荐一本好书</p>
-              </div>
-            </div>
+            <h1>
+              <span>我是一个轻量化 agent，</span>
+              <span>有什么我能帮你的吗？</span>
+            </h1>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <div key={i} className={`message ${msg.role}`}>
-              <div className="message-content">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+          messages.map((msg) => {
+            const messageClass = msg.role === 'assistant' ? 'ai' : msg.role;
+            return (
+              <div key={msg.id} className={`message ${messageClass}`}>
+                <div className="message-content">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  {msg.attachments?.length > 0 && (
+                    <div className="message-attachments">
+                      {msg.attachments.map(attachment => (
+                        <a
+                          key={attachment.id}
+                          className="message-attachment"
+                          href={getAttachmentUrl(attachment.file)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <span className="attachment-icon">📎</span>
+                          <span>{attachment.original_name}</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
         {isLoading && (
           <div className="message ai">
@@ -76,19 +128,28 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
 
       <div className="input-area">
         {showLoginPrompt && (
-          <div style={{
-            textAlign: 'center',
-            marginBottom: '12px',
-            padding: '12px',
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid #ef4444',
-            borderRadius: '8px',
-            color: '#ef4444'
-          }}>
-            请先登录后使用
-          </div>
+          <div className="login-prompt">请先登录后使用</div>
         )}
+        {error && <div className="login-prompt">{error}</div>}
         <div className="input-wrapper">
+          {selectedFiles.length > 0 && (
+            <div className="selected-files">
+              {selectedFiles.map((file, index) => (
+                <div className="selected-file" key={`${file.name}-${file.size}-${file.lastModified}`}>
+                  <span className="selected-file-name">{file.name}</span>
+                  <span className="selected-file-size">{formatFileSize(file.size)}</span>
+                  <button
+                    type="button"
+                    className="remove-file-btn"
+                    onClick={() => removeSelectedFile(index)}
+                    aria-label={`移除 ${file.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             className="input-box"
             value={input}
@@ -104,13 +165,20 @@ function ChatArea({ sidebarVisible, onToggleSidebar, isLoggedIn }) {
           <div className="input-controls">
             <div className="input-controls-left">
               <label className="attach-btn">
-                <input type="file" style={{ display: 'none' }} />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".docx,.pdf"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={handleFileChange}
+                />
                 <svg stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                   <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
                 </svg>
               </label>
             </div>
-            <button className="send-btn" onClick={handleSend} disabled={!input.trim()}>
+            <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && selectedFiles.length === 0) || isLoading}>
               <svg stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                 <path d="m22 2-7 20-4-9-9-4Z"></path>
                 <path d="M22 2 11 13"></path>

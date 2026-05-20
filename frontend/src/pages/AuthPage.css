@@ -3,12 +3,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 32px 16px;
   position: relative;
   z-index: 1;
 }
 
 .auth-card {
   width: 420px;
+  max-width: 100%;
   padding: 56px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -26,8 +28,14 @@
   letter-spacing: 0.5px;
 }
 
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 .form-label {
@@ -50,14 +58,69 @@
   outline: none;
 }
 
+.form-input:hover {
+  box-shadow: 3.5px 4.5px 0 #000;
+}
+
 .form-input:focus {
   box-shadow: 5.5px 7px 0 black;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-input {
+  padding-right: 48px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.password-toggle:hover {
+  color: var(--text-primary);
+}
+
+.password-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.password-input::-ms-reveal,
+.password-input::-ms-clear {
+  display: none;
+}
+
+.password-input::-webkit-credentials-auto-fill-button,
+.password-input::-webkit-caps-lock-indicator {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
 }
 
 .submit-btn {
   width: 100%;
   padding: 2px;
-  margin-top: 32px;
+  margin-top: 12px;
   background: linear-gradient(to top, #1e40af, #3b82f6);
   border: none;
   border-radius: 16px;
@@ -69,6 +132,11 @@
 
 .submit-btn:hover {
   opacity: 1;
+}
+
+.submit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .submit-btn:active {
@@ -97,6 +165,12 @@
   font-size: 14px;
 }
 
+@media (max-width: 520px) {
+  .auth-card {
+    padding: 40px 28px;
+  }
+}
+
 .auth-link a {
   color: var(--accent-dark);
   text-decoration: none;
@@ -105,4 +179,32 @@
 
 .auth-link a:hover {
   text-decoration: underline;
+}
+
+.form-error {
+  padding: 10px 12px;
+  margin-top: 8px;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-size: 14px;
+}
+
+.password-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.strength-weak {
+  color: #dc2626;
+}
+
+.strength-medium {
+  color: #d97706;
+}
+
+.strength-strong {
+  color: #15803d;
 }

@@ -1,32 +1,38 @@
 .settings-page {
   min-height: 100vh;
-  padding: 48px;
+  padding: 32px 0;
   position: relative;
   z-index: 1;
   overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .settings-container {
-  max-width: 800px;
-  margin: 0 auto;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  margin: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 56px;
+  box-shadow: 0 4px 16px var(--shadow-soft);
 }
 
 .settings-title {
   font-family: 'Inter', sans-serif;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 400;
-  margin-bottom: 48px;
+  text-align: center;
+  margin-bottom: 40px;
   color: var(--text-primary);
   letter-spacing: 0.5px;
 }
 
 .settings-section {
-  margin-bottom: 32px;
-  padding-bottom: 32px;
+  margin-bottom: 24px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -35,14 +41,18 @@
 }
 
 .section-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   color: var(--text-primary);
 }
 
 .setting-item {
   margin-bottom: 16px;
+}
+
+.setting-item:last-child {
+  margin-bottom: 0;
 }
 
 .setting-label {
@@ -65,11 +75,16 @@
   outline: none;
 }
 
+.setting-input:hover {
+  box-shadow: 3.5px 4.5px 0 #000;
+}
+
 .setting-input:focus {
   box-shadow: 5.5px 7px 0 black;
 }
 
 .save-btn {
+  width: 100%;
   padding: 12px 32px;
   background: linear-gradient(to top, #2563eb, #3b82f6);
   border: none;
@@ -91,16 +106,36 @@
   transform: scale(0.95);
 }
 
+.settings-error,
+.settings-status {
+  padding: 12px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.settings-error {
+  border: 1px solid #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.settings-status {
+  border: 1px solid var(--accent-primary);
+  background: rgba(16, 163, 127, 0.1);
+  color: var(--accent-primary);
+}
+
 .back-btn {
   margin-bottom: 24px;
-  width: 192px;
-  height: 56px;
+  width: 120px;
+  height: 42px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 8px;
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
   position: relative;
   text-align: center;
@@ -110,10 +145,10 @@
   position: absolute;
   left: 4px;
   top: 4px;
-  width: 25%;
-  height: 48px;
+  width: 34px;
+  height: 32px;
   background: #93c5fd;
-  border-radius: 12px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -122,9 +157,15 @@
 }
 
 .back-btn:hover .back-btn-icon {
-  width: 184px;
+  width: 112px;
 }
 
 .back-btn-text {
   transform: translateX(8px);
+}
+
+@media (max-width: 520px) {
+  .settings-container {
+    padding: 40px 28px;
+  }
 }
