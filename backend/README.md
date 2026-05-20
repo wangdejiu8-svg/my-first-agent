@@ -136,3 +136,10 @@ cd backend
 .\.venv\Scripts\python.exe manage.py check
 .\.venv\Scripts\python.exe manage.py test
 ```
+
+## 2026-05-20 安全加固
+
+- 认证仍然使用 DRF token，但浏览器侧通过 HttpOnly Cookie 承载认证态；前端非只读请求需要同时携带 `X-CSRFToken`。
+- 登录成功后后端会同时签发 `authToken` 和 `csrftoken`，登出与改密会清理两者。
+- 管理后台权限边界已收紧：普通 `staff` 只能管理非特权账号，只有 `superuser` 可以修改 `is_staff` 和 `is_superuser`。
+- 附件上传增加了服务端文件头和文档结构校验，文档解析失败会返回稳定业务错误，不再直接暴露底层解析器异常。

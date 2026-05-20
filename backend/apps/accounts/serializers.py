@@ -3,12 +3,14 @@ import re
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.exceptions import PermissionDenied
 from rest_framework import serializers
 
 from .models import UserSettings
 
 
 User = get_user_model()
+PRIVILEGED_ADMIN_FIELDS = {"is_staff", "is_superuser"}
 
 PASSWORD_STRENGTH_HINT = "密码强度太弱，请至少包含大写字母、小写字母、数字和特殊字符中的 3 类。"
 
@@ -24,6 +26,10 @@ def translate_password_error(message):
 
 def normalize_email(value):
     return (value or "").strip().lower()
+
+
+def is_privileged_user(user):
+    return bool(user and (user.is_staff or user.is_superuser))
 
 
 def validate_password_strength(password, user=None):
@@ -73,6 +79,25 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "password",
         ]
         read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        target = self.instance
+
+        if getattr(actor, "is_superuser", False):
+            return attrs
+
+        if is_privileged_user(target):
+            raise PermissionDenied("普通管理员只能管理非特权账号。")
+
+        requested_privileged_fields = PRIVILEGED_ADMIN_FIELDS.intersection(self.initial_data.keys())
+        for field_name in requested_privileged_fields:
+            requested_value = attrs.get(field_name, getattr(target, field_name))
+            if requested_value != getattr(target, field_name):
+                raise PermissionDenied("只有超级管理员可以修改管理员角色。")
+
+        return attrs
 
     def validate_email(self, value):
         value = normalize_email(value)

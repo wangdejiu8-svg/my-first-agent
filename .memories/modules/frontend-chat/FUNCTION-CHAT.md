@@ -86,6 +86,13 @@ Conversation.objects.active().owned_by(request.user)
 - `python manage.py test` 通过，当前 7 个测试
 - `npm run build` 通过
 
+## 2026-05-20 更新：上传安全加固
+
+- 上传入口不再只信任扩展名和前端 `content_type`，新增了 PDF 文件头校验与 DOCX ZIP 结构校验。
+- 服务端会拒绝空文件、异常 DOCX 结构、非法归档路径和解压后体积异常的文档。
+- 保存附件时会收敛 `original_name` 为基名，避免把路径片段带进业务数据。
+- 文档读取失败现在统一返回稳定业务错误，不再直接向上层暴露底层解析器异常。
+
 ## 后续计划
 
 - 将普通非流式回复升级为 SSE 流式输出。

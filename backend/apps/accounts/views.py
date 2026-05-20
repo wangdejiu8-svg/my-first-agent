@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.middleware import csrf
 from rest_framework import status
 from rest_framework.authentication import get_authorization_header
 from rest_framework.authtoken.models import Token
@@ -15,6 +16,7 @@ from .serializers import (
     RegisterSerializer,
     UserSerializer,
     UserSettingsSerializer,
+    is_privileged_user,
 )
 
 User = get_user_model()
@@ -40,6 +42,7 @@ class LoginView(APIView):
         user = serializer.validated_data["user"]
         token, _created = Token.objects.get_or_create(user=user)
         UserSettings.objects.get_or_create(user=user)
+        csrf.get_token(request)
         response = Response({"user": UserSerializer(user).data})
         response.set_cookie(
             settings.AUTH_TOKEN_COOKIE_NAME,
@@ -65,6 +68,7 @@ class LogoutView(APIView):
             settings.AUTH_TOKEN_COOKIE_NAME,
             path="/",
         )
+        response.delete_cookie("csrftoken", path="/")
         return response
 
 
@@ -104,6 +108,7 @@ class ChangePasswordView(APIView):
             settings.AUTH_TOKEN_COOKIE_NAME,
             path="/",
         )
+        response.delete_cookie("csrftoken", path="/")
         return response
 
 
@@ -117,6 +122,7 @@ class AdminLoginView(APIView):
         if not user.is_staff and not user.is_superuser:
             return Response({"detail": "不是管理员账号。"}, status=status.HTTP_403_FORBIDDEN)
         token, _created = Token.objects.get_or_create(user=user)
+        csrf.get_token(request)
         response = Response({"user": UserSerializer(user).data})
         response.set_cookie(
             settings.AUTH_TOKEN_COOKIE_NAME,
@@ -165,7 +171,13 @@ class AdminUserDetailView(APIView):
         except User.DoesNotExist:
             return Response({"detail": "用户不存在。"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AdminUserSerializer(target, data=request.data, partial=True)
+        if request.user.is_staff and not request.user.is_superuser and is_privileged_user(target):
+            return Response(
+                {"detail": "普通管理员只能管理非特权账号。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = AdminUserSerializer(target, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(AdminUserSerializer(target).data)
@@ -179,6 +191,12 @@ class AdminUserDetailView(APIView):
             target = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({"detail": "用户不存在。"}, status=status.HTTP_404_NOT_FOUND)
+        if request.user.is_staff and not request.user.is_superuser and is_privileged_user(target):
+            return Response(
+                {"detail": "普通管理员只能管理非特权账号。"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         target.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

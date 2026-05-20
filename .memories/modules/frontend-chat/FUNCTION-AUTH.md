@@ -8,17 +8,17 @@
 
 - `frontend/src/contexts/AuthContext.js` 统一维护 `user`、`isLoggedIn`、`isAuthLoading`。
 - `frontend/src/services/authApi.js` 封装注册、登录、登出、当前用户接口。
-- `frontend/src/services/apiClient.js` 统一注入 `Authorization: Token <token>`。
+- `frontend/src/services/apiClient.js` 统一携带 Cookie 登录态，并在非只读请求里自动注入 `X-CSRFToken`。
 - `LoginPage.js` 调用真实 `/api/auth/login/`。
 - `RegisterPage.js` 调用真实 `/api/auth/register/`。
 
 ## 后端实现
 
 - `backend/apps/accounts/` 提供注册、登录、登出、当前用户、设置和修改密码接口。
-- 鉴权方式：DRF TokenAuthentication。
+- 鉴权方式：DRF TokenAuthentication + HttpOnly Cookie，Cookie 身份的非只读请求需要通过 CSRF 校验。
 - 注册时创建 Django User，并初始化 `UserSettings`。
 - 登录支持用户名或邮箱。
-- 登出会删除当前用户 token。
+- 登录会签发 `authToken` 与 `csrftoken`，登出和改密会删除当前用户 token 与相关 Cookie。
 
 ## API 接口
 
@@ -37,8 +37,14 @@ cd backend
 
 ## 踩坑记录
 
-- 当前本地开发使用 Token 鉴权，避免 React dev server 跨域调用 Django 时被 CSRF/Cookie 配置阻塞。
+- 只要浏览器通过 Cookie 承载 token，就必须在前端补 `X-CSRFToken`，否则 `POST`、`PATCH`、`DELETE` 会被服务端按预期拦截。
 - 修改密码后后端会删除 token，前端需要引导用户重新登录。
+
+## 2026-05-20 更新：认证与后台安全边界
+
+- 普通 `staff` 只能管理非特权账号，不能修改或删除 `staff/superuser`。
+- 只有 `superuser` 可以修改 `is_staff`、`is_superuser`。
+- 登录响应会同步发放 `csrftoken`，前端统一由 `apiClient` 自动注入 CSRF 请求头。
 
 ## 2026-05-18 更新：认证页 UI 优化
 

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
@@ -9,6 +7,8 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from ai.document_readers import DocumentReadError, validate_uploaded_document
 
 from .models import Attachment, Conversation, Message
 from .serializers import (
@@ -84,7 +84,12 @@ class SendMessageView(APIView):
         attachment_ids = serializer.validated_data.get("attachment_ids") or []
         if len(set(attachment_ids)) > settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
             return Response(
-                {"detail": f"单条消息最多只能附带 {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"},
+                {
+                    "detail": (
+                        f"单条消息最多只能附带 "
+                        f"{settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -155,7 +160,11 @@ class FileUploadView(APIView):
 
         if len(uploaded_files) > settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
             return Response(
-                {"detail": f"一次最多上传 {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"},
+                {
+                    "detail": (
+                        f"一次最多上传 {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -166,7 +175,7 @@ class FileUploadView(APIView):
 
         attachments = []
         for uploaded_file in uploaded_files:
-            validation_error = self._validate_uploaded_file(uploaded_file)
+            original_name, validation_error = self._validate_uploaded_file(uploaded_file)
             if validation_error:
                 return Response({"detail": validation_error}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -174,7 +183,7 @@ class FileUploadView(APIView):
                 owner=request.user,
                 conversation=conversation,
                 file=uploaded_file,
-                original_name=uploaded_file.name,
+                original_name=original_name,
                 content_type=getattr(uploaded_file, "content_type", "") or "",
                 size=uploaded_file.size,
             )
@@ -185,14 +194,15 @@ class FileUploadView(APIView):
         return Response(AttachmentSerializer(attachments, many=True).data, status=status.HTTP_201_CREATED)
 
     def _validate_uploaded_file(self, uploaded_file):
-        suffix = Path(uploaded_file.name or "").suffix.lower()
         content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
-
-        if suffix not in settings.CHAT_ALLOWED_ATTACHMENT_EXTENSIONS:
-            return "仅支持上传 .docx 和 .pdf 文件。"
         if content_type and content_type not in settings.CHAT_ALLOWED_ATTACHMENT_CONTENT_TYPES:
-            return "文件类型不被允许。"
-        if uploaded_file.size > settings.CHAT_MAX_ATTACHMENT_SIZE_BYTES:
-            max_size_mb = settings.CHAT_MAX_ATTACHMENT_SIZE_BYTES // (1024 * 1024)
-            return f"单个文件不能超过 {max_size_mb}MB。"
-        return None
+            return None, "文件类型不被允许。"
+
+        try:
+            original_name = validate_uploaded_document(
+                uploaded_file,
+                max_size_bytes=settings.CHAT_MAX_ATTACHMENT_SIZE_BYTES,
+            )
+        except DocumentReadError as exc:
+            return None, str(exc)
+        return original_name, None

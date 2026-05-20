@@ -1,10 +1,16 @@
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
+const CSRF_COOKIE_NAME = 'csrftoken';
 
 export async function apiRequest(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
   const headers = {
     ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...options.headers,
   };
+  const csrfToken = shouldSendCsrfToken(method) ? readCookie(CSRF_COOKIE_NAME) : '';
+  if (csrfToken && !headers['X-CSRFToken']) {
+    headers['X-CSRFToken'] = csrfToken;
+  }
 
   let response;
   try {
@@ -33,14 +39,34 @@ export async function apiRequest(path, options = {}) {
 }
 
 function normalizeApiError(data, status) {
+  const rawMessage = extractErrorMessage(data);
   if (status === 401) return '请先登录后再操作';
-  if (status === 403) return '你没有权限执行此操作';
+  if (status === 403) {
+    if (String(rawMessage).includes('CSRF Failed')) {
+      return '安全校验已失效，请刷新页面后重试';
+    }
+    return '你没有权限执行此操作';
+  }
   if (status === 404) return '请求的内容不存在或已被删除';
   if (status >= 500) return '服务器暂时不可用，请稍后重试';
 
-  const rawMessage = extractErrorMessage(data);
   if (!rawMessage) return '请求失败，请稍后重试';
   return translateKnownError(rawMessage);
+}
+
+function shouldSendCsrfToken(method) {
+  return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method);
+}
+
+function readCookie(name) {
+  if (typeof document === 'undefined' || !document.cookie) return '';
+  const target = `${name}=`;
+  const matchedCookie = document.cookie
+    .split(';')
+    .map(chunk => chunk.trim())
+    .find(chunk => chunk.startsWith(target));
+  if (!matchedCookie) return '';
+  return decodeURIComponent(matchedCookie.slice(target.length));
 }
 
 function extractErrorMessage(data) {
@@ -74,6 +100,8 @@ function translateKnownError(message) {
     'Conversation was not found.': '对话不存在或已被删除',
     'Missing file.': '请选择要上传的文件',
     'Only .docx and .pdf files are supported.': '仅支持上传 .docx 和 .pdf 文件',
+    'Only superusers can modify staff or superuser roles.': '只有超级管理员可以修改管理员角色',
+    'Staff users can only manage non-privileged accounts.': '普通管理员只能管理非特权账号',
   };
   return knownMessages[text] || text;
 }

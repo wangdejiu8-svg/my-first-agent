@@ -23,6 +23,9 @@
 - 不要用前端传入的 `user_id` 代替后端当前用户。
 - 不要绕过 `Conversation.objects.active().owned_by(user)` 这类归属过滤。
 - 文件上传后要记录所有者，后续绑定消息时要再次校验归属。
+- 使用 Cookie 承载 token 时，任何 `POST`、`PATCH`、`DELETE` 等非只读请求都必须通过 CSRF 校验。
+- 普通 `staff` 不能提升、降级、删除或修改 `staff/superuser` 账号，角色字段只能由 `superuser` 修改。
+- `.docx`、`.pdf` 上传不能只信任扩展名和前端 `content_type`，至少要做服务端文件头或结构校验，并对解析失败返回稳定错误。
 
 ## 验证规则
 
