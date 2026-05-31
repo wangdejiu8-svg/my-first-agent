@@ -28,6 +28,10 @@ def normalize_email(value):
     return (value or "").strip().lower()
 
 
+def username_taken(value, exclude_user=None):
+    return User.objects.exclude(pk=getattr(exclude_user, "pk", None)).filter(username=value).exists()
+
+
 def is_privileged_user(user):
     return bool(user and (user.is_staff or user.is_superuser))
 
@@ -108,7 +112,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         user = self.instance
-        if User.objects.exclude(pk=getattr(user, "pk", None)).filter(username__iexact=value).exists():
+        if username_taken(value, exclude_user=user):
             raise serializers.ValidationError("用户名已被占用。")
         return value
 
@@ -147,7 +151,7 @@ class RegisterSerializer(serializers.Serializer):
     )
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
+        if username_taken(value):
             raise serializers.ValidationError("用户名已被占用。")
         return value
 
@@ -216,7 +220,7 @@ class UserSettingsSerializer(serializers.ModelSerializer):
 
     def validate_username(self, value):
         user = getattr(self.instance, "user", None)
-        if User.objects.exclude(pk=getattr(user, "pk", None)).filter(username__iexact=value).exists():
+        if username_taken(value, exclude_user=user):
             raise serializers.ValidationError("用户名已被占用。")
         return value
 

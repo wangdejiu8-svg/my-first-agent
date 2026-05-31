@@ -7,9 +7,9 @@ from .prompts import SYSTEM_PROMPT
 from .tools import build_tools
 
 
-def build_chat_graph(user, conversation):
+def build_chat_graph(user, conversation, *, streaming=False):
     tools = build_tools(user=user, conversation=conversation)
-    model = get_chat_model().bind_tools(tools)
+    model = get_chat_model(streaming=streaming).bind_tools(tools)
 
     def assistant_node(state: MessagesState):
         response = model.invoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])

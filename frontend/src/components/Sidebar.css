@@ -1,8 +1,15 @@
-.sidebar {
+.sidebar-shell {
   width: 260px;
   height: 100vh;
   background: #fafafa;
   border-right: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 260px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -158,19 +165,6 @@
 
 .user-menu-trigger:hover {
   background: var(--bg-tertiary);
-}
-
-.user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 500;
-  font-size: 14px;
-  color: white;
 }
 
 .user-menu {

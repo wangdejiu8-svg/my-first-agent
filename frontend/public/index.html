@@ -4,6 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 对话助手</title>
+  <script>
+    (function () {
+      var pathname = window.location.pathname || '/';
+      var hash = window.location.hash || '';
+      var isStaticAsset = /\.[a-zA-Z0-9]+$/.test(pathname);
+
+      if (pathname !== '/' && !isStaticAsset) {
+        var normalizedHash = hash && hash.indexOf('#/') === 0 ? hash.slice(1) : pathname;
+        if (normalizedHash.charAt(0) !== '/') {
+          normalizedHash = '/' + normalizedHash;
+        }
+        var target = '/#' + normalizedHash + (window.location.search || '');
+        window.location.replace(target);
+      }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">

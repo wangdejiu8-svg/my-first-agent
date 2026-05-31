@@ -3,6 +3,7 @@
 ## 已创建模块
 
 - [frontend-chat](./frontend-chat/) - 前端AI对话应用
+- [backend-rag](./backend-rag/) - 后端 RAG 检索与 gate 规则
 
 ## 模块说明
 

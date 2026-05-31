@@ -1,25 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import UserAvatar from '../components/UserAvatar';
 import { useAuth } from '../contexts/AuthContext';
 import { settingsApi } from '../services/settingsApi';
 import './SettingsPage.css';
 
 function SettingsPage() {
   const navigate = useNavigate();
-  const { isLoggedIn, isAuthLoading, setUser } = useAuth();
-  const [settings, setSettings] = useState({
+  const { user, isLoggedIn, isAuthLoading, setUser } = useAuth();
+  const [profile, setProfile] = useState({
     username: '',
     email: '',
+  });
+  const [savedProfile, setSavedProfile] = useState({
+    username: '',
+    email: '',
+  });
+  const [passwords, setPasswords] = useState({
     oldPassword: '',
     newPassword: '',
     confirmPassword: '',
-    theme: 'light',
-    language: 'zh-CN',
-    font_size: 'medium'
   });
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   useEffect(() => {
     if (isAuthLoading) return;
@@ -27,186 +32,217 @@ function SettingsPage() {
       navigate('/login');
       return;
     }
+
     settingsApi
       .getSettings()
-      .then(data => setSettings(prev => ({ ...prev, ...data })))
-      .catch(err => setError(err.message));
+      .then((data) => {
+        const nextProfile = {
+          username: data.username || '',
+          email: data.email || '',
+        };
+        setProfile(nextProfile);
+        setSavedProfile(nextProfile);
+      })
+      .catch((err) => setError(err.message || '设置加载失败'));
   }, [isAuthLoading, isLoggedIn, navigate]);
 
-  const updateField = (key, value) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
+  const displayName = useMemo(
+    () => profile.username || user?.username || '用户',
+    [profile.username, user],
+  );
+
+  const isProfileDirty = useMemo(
+    () => profile.username !== savedProfile.username || profile.email !== savedProfile.email,
+    [profile, savedProfile],
+  );
+
+  const updateProfileField = (key, value) => {
+    setProfile((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveSettings = async () => {
+  const updatePasswordField = (key, value) => {
+    setPasswords((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveProfile = async () => {
     setStatus('');
     setError('');
+    setIsSavingProfile(true);
     try {
       const data = await settingsApi.updateSettings({
-        username: settings.username,
-        email: settings.email,
-        theme: settings.theme,
-        language: settings.language,
-        font_size: settings.font_size,
+        username: profile.username,
+        email: profile.email,
       });
-      setSettings(prev => ({ ...prev, ...data }));
-      setUser(prev => prev ? { ...prev, username: data.username, email: data.email } : prev);
-      setStatus('设置已保存');
+      const nextProfile = {
+        username: data.username || '',
+        email: data.email || '',
+      };
+      setProfile(nextProfile);
+      setSavedProfile(nextProfile);
+      setUser((prev) => (
+        prev
+          ? { ...prev, username: data.username, email: data.email }
+          : prev
+      ));
+      setStatus('账户资料已更新');
     } catch (err) {
       setError(err.message || '保存失败');
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
   const handleChangePassword = async () => {
     setStatus('');
     setError('');
-    if (!settings.oldPassword && !settings.newPassword && !settings.confirmPassword) {
+
+    const hasAnyPasswordInput = Object.values(passwords).some(Boolean);
+    if (!hasAnyPasswordInput) {
+      setError('请先填写密码信息');
       return;
     }
+
+    if (Object.values(passwords).some((value) => !value.trim())) {
+      setError('请完整填写旧密码、新密码和确认密码');
+      return;
+    }
+
+    setIsChangingPassword(true);
     try {
       await settingsApi.changePassword({
-        old_password: settings.oldPassword,
-        new_password: settings.newPassword,
-        confirm_password: settings.confirmPassword,
+        old_password: passwords.oldPassword,
+        new_password: passwords.newPassword,
+        confirm_password: passwords.confirmPassword,
       });
-      setSettings(prev => ({
-        ...prev,
+      setPasswords({
         oldPassword: '',
         newPassword: '',
         confirmPassword: '',
-      }));
-      setStatus('密码已修改，请重新登录');
+      });
+      setUser(null);
+      navigate('/login');
     } catch (err) {
       setError(err.message || '密码修改失败');
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
-  const handleSave = async () => {
-    await handleSaveSettings();
-    await handleChangePassword();
-  };
-
   if (isAuthLoading) {
-    return <div className="settings-page" />;
+    return (
+      <div className="settings-page">
+        <div className="settings-shell">
+          <div className="settings-loading-card" />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="settings-page">
-      <motion.div
-        className="settings-container"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45 }}
-      >
-        <button className="back-btn" onClick={() => navigate('/')}>
-          <div className="back-btn-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" height="25px" width="25px">
-              <path d="M224 480h640a32 32 0 1 1 0 64H224a32 32 0 0 1 0-64z" fill="#000000"></path>
-              <path d="m237.248 512 265.408 265.344a32 32 0 0 1-45.312 45.312l-288-288a32 32 0 0 1 0-45.312l288-288a32 32 0 1 1 45.312 45.312L237.248 512z" fill="#000000"></path>
-            </svg>
+      <div className="settings-shell">
+        <header className="settings-header">
+          <div className="settings-identity">
+            <UserAvatar name={displayName || user?.email} size="lg" />
+            <div className="settings-identity-text">
+              <h1 className="settings-title">{displayName}</h1>
+              <p className="settings-subtitle">账户与安全</p>
+            </div>
+            <button className="settings-back-link" onClick={() => navigate('/')}>
+              返回对话
+            </button>
           </div>
-          <span className="back-btn-text">返回</span>
-        </button>
-        <h1 className="settings-title">设置</h1>
-
-        <div className="settings-section">
-          <h2 className="section-title">个人信息</h2>
-          <div className="setting-item">
-            <label className="setting-label">用户名</label>
-            <input
-              className="setting-input"
-              autoComplete="username"
-              value={settings.username}
-              onChange={e => updateField('username', e.target.value)}
-            />
-          </div>
-          <div className="setting-item">
-            <label className="setting-label">邮箱</label>
-            <input
-              className="setting-input"
-              type="email"
-              autoComplete="email"
-              value={settings.email}
-              onChange={e => updateField('email', e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <h2 className="section-title">账号安全</h2>
-          <div className="setting-item">
-            <label className="setting-label">旧密码</label>
-            <input
-              className="setting-input"
-              type="password"
-              autoComplete="current-password"
-              value={settings.oldPassword}
-              onChange={e => updateField('oldPassword', e.target.value)}
-            />
-          </div>
-          <div className="setting-item">
-            <label className="setting-label">新密码</label>
-            <input
-              className="setting-input"
-              type="password"
-              autoComplete="new-password"
-              value={settings.newPassword}
-              onChange={e => updateField('newPassword', e.target.value)}
-            />
-          </div>
-          <div className="setting-item">
-            <label className="setting-label">确认新密码</label>
-            <input
-              className="setting-input"
-              type="password"
-              autoComplete="new-password"
-              value={settings.confirmPassword}
-              onChange={e => updateField('confirmPassword', e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <h2 className="section-title">界面设置</h2>
-          <div className="setting-item">
-            <label className="setting-label">主题</label>
-            <select
-              className="setting-input"
-              value={settings.theme}
-              onChange={e => updateField('theme', e.target.value)}
-            >
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-            </select>
-          </div>
-          <div className="setting-item">
-            <label className="setting-label">语言</label>
-            <select
-              className="setting-input"
-              value={settings.language}
-              onChange={e => updateField('language', e.target.value)}
-            >
-              <option value="zh-CN">中文</option>
-              <option value="en-US">English</option>
-            </select>
-          </div>
-          <div className="setting-item">
-            <label className="setting-label">字体大小</label>
-            <select
-              className="setting-input"
-              value={settings.font_size}
-              onChange={e => updateField('font_size', e.target.value)}
-            >
-              <option value="small">小</option>
-              <option value="medium">中</option>
-              <option value="large">大</option>
-            </select>
-          </div>
-        </div>
+        </header>
 
         {error && <div className="settings-error">{error}</div>}
         {status && <div className="settings-status">{status}</div>}
-        <button className="save-btn" onClick={handleSave}>保存设置</button>
-      </motion.div>
+
+        <section className="settings-section">
+          <p className="settings-section-title">账号</p>
+          <div className="settings-list">
+            <label className="settings-item">
+              <span className="settings-item-label">用户名</span>
+              <input
+                className="settings-input"
+                autoComplete="username"
+                value={profile.username}
+                onChange={(e) => updateProfileField('username', e.target.value)}
+              />
+            </label>
+
+            <label className="settings-item">
+              <span className="settings-item-label">邮箱</span>
+              <input
+                className="settings-input"
+                type="email"
+                autoComplete="email"
+                value={profile.email}
+                onChange={(e) => updateProfileField('email', e.target.value)}
+              />
+            </label>
+
+            <div className="settings-item settings-item-action">
+              <span className="settings-item-label">资料保存</span>
+              <button
+                className="settings-action-button settings-action-button-primary"
+                onClick={handleSaveProfile}
+                disabled={!isProfileDirty || isSavingProfile || isChangingPassword}
+              >
+                {isSavingProfile ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <p className="settings-section-title">安全</p>
+          <div className="settings-list">
+            <label className="settings-item">
+              <span className="settings-item-label">旧密码</span>
+              <input
+                className="settings-input"
+                type="password"
+                autoComplete="current-password"
+                value={passwords.oldPassword}
+                onChange={(e) => updatePasswordField('oldPassword', e.target.value)}
+              />
+            </label>
+
+            <label className="settings-item">
+              <span className="settings-item-label">新密码</span>
+              <input
+                className="settings-input"
+                type="password"
+                autoComplete="new-password"
+                value={passwords.newPassword}
+                onChange={(e) => updatePasswordField('newPassword', e.target.value)}
+              />
+            </label>
+
+            <label className="settings-item">
+              <span className="settings-item-label">确认新密码</span>
+              <input
+                className="settings-input"
+                type="password"
+                autoComplete="new-password"
+                value={passwords.confirmPassword}
+                onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
+              />
+            </label>
+
+            <div className="settings-item settings-item-action">
+              <span className="settings-item-label">密码更新</span>
+              <button
+                className="settings-action-button"
+                onClick={handleChangePassword}
+                disabled={isSavingProfile || isChangingPassword}
+              >
+                {isChangingPassword ? '提交中...' : '更新'}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

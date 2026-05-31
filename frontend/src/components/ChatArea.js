@@ -1,11 +1,93 @@
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '../services/apiClient';
 import './ChatArea.css';
 
+const MAX_FALLBACK_CHUNKS = 3;
+const MAX_SNIPPETS_PER_SOURCE = 2;
+const BOTTOM_STICKY_THRESHOLD = 80;
+
+const normalizeList = (value) => (Array.isArray(value) ? value : []);
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const normalizeRecordList = (value) => normalizeList(value).filter(isObject);
+const formatRagScore = (value) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return null;
+  return value.toFixed(3);
+};
+
+const summarizeSnippet = (text) => {
+  if (typeof text !== 'string' && typeof text !== 'number') return '';
+  const normalizedText = String(text).replace(/\s+/g, ' ').trim();
+  if (normalizedText.length <= 140) return normalizedText;
+  return `${normalizedText.slice(0, 140).trim()}...`;
+};
+
+const buildSourceDisplay = (message) => {
+  const sources = normalizeRecordList(message.sources);
+  const usedChunks = normalizeRecordList(message.used_chunks);
+  const groupedUsedChunks = usedChunks.reduce((acc, chunk) => {
+    const key = chunk.attachment_id ?? chunk.attachment_name ?? 'unknown';
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(chunk);
+    return acc;
+  }, {});
+
+  if (sources.length > 0) {
+    return sources.map((source) => {
+      const sourceKey = source.attachment_id ?? source.attachment_name ?? 'unknown';
+      const snippets = normalizeList(source.snippets)
+        .map(summarizeSnippet)
+        .filter(Boolean)
+        .slice(0, MAX_SNIPPETS_PER_SOURCE);
+      const fallbackSnippets = snippets.length > 0
+        ? snippets
+        : (groupedUsedChunks[sourceKey] || [])
+          .map(chunk => summarizeSnippet(chunk.text))
+          .filter(Boolean)
+          .slice(0, MAX_FALLBACK_CHUNKS);
+
+      return {
+        key: sourceKey,
+        attachmentName: source.attachment_name || 'Reference',
+        chunkCount: source.chunk_count,
+        snippets: fallbackSnippets,
+      };
+    });
+  }
+
+  return Object.values(
+    usedChunks.reduce((acc, chunk) => {
+      const key = chunk.attachment_id ?? chunk.attachment_name ?? `chunk-${chunk.chunk_index ?? 'unknown'}`;
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          attachmentName: chunk.attachment_name || 'Reference',
+          chunkCount: 0,
+          snippets: [],
+        };
+      }
+
+      if (acc[key].snippets.length < MAX_FALLBACK_CHUNKS) {
+        const snippet = summarizeSnippet(chunk.text);
+        if (snippet) {
+          acc[key].snippets.push(snippet);
+        }
+      }
+
+      acc[key].chunkCount += 1;
+      return acc;
+    }, {})
+  );
+};
+
 function ChatArea({
   sidebarVisible,
   onToggleSidebar,
+  conversationId,
+  scrollRequestKey,
+  forceStickToBottom,
   isLoggedIn,
   messages,
   error,
@@ -15,7 +97,130 @@ function ChatArea({
   const [input, setInput] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const fileInputRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const scrollFrameRef = useRef(0);
+  const shouldStickToBottomRef = useRef(true);
+  const lastMessage = messages[messages.length - 1] || null;
+  const lastMessageSignature = [
+    lastMessage?.id || 'none',
+    lastMessage?.content?.length || 0,
+    lastMessage?.attachments?.length || 0,
+    lastMessage?.sources?.length || 0,
+    lastMessage?.used_chunks?.length || 0,
+  ].join(':');
+  const previousRenderStateRef = useRef({
+    conversationId,
+    messageCount: messages.length,
+    isLoading,
+    lastMessageSignature,
+  });
+
+  const isNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+
+    return (
+      container.scrollHeight - container.scrollTop - container.clientHeight
+      <= BOTTOM_STICKY_THRESHOLD
+    );
+  };
+
+  const scrollToBottom = (behavior = 'auto') => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+      container.scrollTo({ top: container.scrollHeight, behavior });
+    }
+
+    const scrollingElement = document.scrollingElement;
+    if (scrollingElement) {
+      scrollingElement.scrollTop = scrollingElement.scrollHeight;
+      scrollingElement.scrollTo({ top: scrollingElement.scrollHeight, behavior });
+    }
+  };
+
+  const scheduleScrollToBottom = (behavior = 'auto') => {
+    if (scrollFrameRef.current) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollToBottom(behavior);
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        scrollToBottom(behavior);
+      });
+    });
+  };
+
+  useLayoutEffect(() => {
+    const previousState = previousRenderStateRef.current;
+    const isConversationChanged = previousState.conversationId !== conversationId;
+    const hasNewContent = (
+      previousState.messageCount !== messages.length
+      || previousState.isLoading !== isLoading
+      || previousState.lastMessageSignature !== lastMessageSignature
+    );
+
+    if (isConversationChanged) {
+      shouldStickToBottomRef.current = true;
+    }
+
+    const shouldAutoScroll = forceStickToBottom || shouldStickToBottomRef.current;
+
+    if (shouldAutoScroll && (isConversationChanged || hasNewContent)) {
+      const behavior = (
+        isConversationChanged
+        || previousState.messageCount === messages.length
+        || previousState.isLoading !== isLoading
+      )
+        ? 'auto'
+        : 'smooth';
+      scheduleScrollToBottom(behavior);
+    }
+
+    previousRenderStateRef.current = {
+      conversationId,
+      messageCount: messages.length,
+      isLoading,
+      lastMessageSignature,
+    };
+  }, [conversationId, isLoading, lastMessageSignature, messages.length]);
+
+  useLayoutEffect(() => {
+    if (forceStickToBottom || shouldStickToBottomRef.current) {
+      scheduleScrollToBottom('auto');
+    }
+  }, [error, forceStickToBottom, selectedFiles.length, showLoginPrompt]);
+
+  useLayoutEffect(() => {
+    if (!scrollRequestKey) return;
+    shouldStickToBottomRef.current = true;
+    setShowScrollToBottomButton(false);
+    scheduleScrollToBottom('auto');
+  }, [scrollRequestKey]);
+
+  useLayoutEffect(() => {
+    if (!forceStickToBottom) return;
+    setShowScrollToBottomButton(false);
+  }, [forceStickToBottom]);
+
+  useLayoutEffect(() => {
+    const handleWindowResize = () => {
+      if (forceStickToBottom || shouldStickToBottomRef.current) {
+        scheduleScrollToBottom('auto');
+      }
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      if (scrollFrameRef.current) {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
+    };
+  }, [forceStickToBottom]);
 
   const handleSend = async () => {
     if (!isLoggedIn) {
@@ -62,6 +267,23 @@ function ChatArea({
     setSelectedFiles(prev => prev.filter((_file, index) => index !== indexToRemove));
   };
 
+  const handleMessagesScroll = () => {
+    if (forceStickToBottom) {
+      shouldStickToBottomRef.current = true;
+      setShowScrollToBottomButton(false);
+      return;
+    }
+    const nearBottom = isNearBottom();
+    shouldStickToBottomRef.current = nearBottom;
+    setShowScrollToBottomButton(!nearBottom);
+  };
+
+  const handleScrollToBottomClick = () => {
+    shouldStickToBottomRef.current = true;
+    setShowScrollToBottomButton(false);
+    scheduleScrollToBottom('smooth');
+  };
+
   const formatFileSize = (size) => {
     if (size < 1024) return `${size} B`;
     if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -81,7 +303,11 @@ function ChatArea({
       <button className="toggle-sidebar-btn" onClick={onToggleSidebar}>
         {sidebarVisible ? '◀' : '▶'}
       </button>
-      <div className="messages-container">
+      <div
+        ref={messagesContainerRef}
+        className="messages-container"
+        onScroll={handleMessagesScroll}
+      >
         {messages.length === 0 ? (
           <div className="welcome-message">
             <h1>
@@ -92,6 +318,12 @@ function ChatArea({
         ) : (
           messages.map((msg) => {
             const messageClass = msg.role === 'assistant' ? 'ai' : msg.role;
+            const shouldShowSources = msg.role === 'assistant' && (
+              normalizeRecordList(msg.sources).length > 0 || normalizeRecordList(msg.used_chunks).length > 0
+            );
+            const displayedSources = shouldShowSources ? buildSourceDisplay(msg) : [];
+            const ragScore = formatRagScore(msg.rag_score);
+
             return (
               <div key={msg.id} className={`message ${messageClass}`}>
                 <div className="message-content">
@@ -112,12 +344,48 @@ function ChatArea({
                       ))}
                     </div>
                   )}
+                  {shouldShowSources && displayedSources.length > 0 && (
+                    <div className="message-sources" aria-label="Answer sources">
+                      <div className="message-sources-header">
+                        <span className="message-sources-label">
+                          {msg.is_rag_answer ? 'Sources used' : 'Related references'}
+                        </span>
+                        {ragScore && (
+                          <span className="message-rag-score">RAG score {ragScore}</span>
+                        )}
+                      </div>
+                      <div className="message-sources-list">
+                        {displayedSources.map((source) => (
+                          <div key={source.key} className="message-source-card">
+                            <div className="message-source-meta">
+                              <span className="message-source-name">{source.attachmentName}</span>
+                              {typeof source.chunkCount === 'number' && source.chunkCount > 0 && (
+                                <span className="message-source-count">{source.chunkCount} chunks</span>
+                              )}
+                            </div>
+                            {source.snippets.length > 0 && (
+                              <div className="message-source-snippets">
+                                {source.snippets.map((snippet, index) => (
+                                  <p
+                                    key={`${source.key}-snippet-${index}`}
+                                    className="message-source-snippet"
+                                  >
+                                    {snippet}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })
         )}
-        {isLoading && (
+        {isLoading && lastMessage?.role !== 'assistant' && (
           <div className="message ai">
             <div className="message-content">
               <span>正在输入...</span>
@@ -125,6 +393,17 @@ function ChatArea({
           </div>
         )}
       </div>
+
+      {showScrollToBottomButton && (
+        <button
+          type="button"
+          className="scroll-to-bottom-btn"
+          onClick={handleScrollToBottomClick}
+          aria-label="Scroll to latest message"
+        >
+          ↓
+        </button>
+      )}
 
       <div className="input-area">
         {showLoginPrompt && (

@@ -1,6 +1,11 @@
+import os
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
+import shutil
+import subprocess
 import zipfile
 
+from django.conf import settings
 from docx import Document
 from pypdf import PdfReader
 
@@ -16,6 +21,7 @@ REQUIRED_DOCX_MEMBERS = {
     "_rels/.rels",
     "word/document.xml",
 }
+DEFAULT_PDF_OCR_DPI = 300
 
 
 class DocumentReadError(ValueError):
@@ -129,6 +135,33 @@ def _read_docx(path, max_chars):
 
 
 def _read_pdf(path, max_chars):
+    text, truncated = _read_pdf_with_pypdf(path, max_chars)
+    if text:
+        return text, truncated
+
+    text, truncated = _read_pdf_with_pymupdf(path, max_chars=max_chars)
+    if text:
+        return text, truncated
+
+    if not _ocr_fallback_is_configured():
+        return "", False
+
+    try:
+        ocr_language = _resolve_pdf_ocr_language(
+            getattr(settings, "PDF_OCR_LANGUAGE", "auto")
+        )
+        return _read_pdf_with_pymupdf(
+            path,
+            max_chars=max_chars,
+            use_ocr=True,
+            ocr_language=ocr_language,
+            ocr_dpi=getattr(settings, "PDF_OCR_DPI", DEFAULT_PDF_OCR_DPI),
+        )
+    except Exception:
+        return "", False
+
+
+def _read_pdf_with_pypdf(path, max_chars):
     reader = PdfReader(path)
     builder = _LimitedTextBuilder(max_chars=max_chars, separator="\n\n")
 
@@ -140,6 +173,90 @@ def _read_pdf(path, max_chars):
             return builder.build(), True
 
     return builder.build(), False
+
+
+def _read_pdf_with_pymupdf(
+    path,
+    *,
+    max_chars,
+    use_ocr=False,
+    ocr_language="eng",
+    ocr_dpi=DEFAULT_PDF_OCR_DPI,
+):
+    try:
+        import pymupdf
+    except ImportError:
+        return "", False
+
+    builder = _LimitedTextBuilder(max_chars=max_chars, separator="\n\n")
+    with pymupdf.open(path) as document:
+        for index, page in enumerate(document, start=1):
+            if use_ocr:
+                text = _extract_pdf_page_text_with_ocr(
+                    page,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+            else:
+                text = page.get_text("text", sort=True).strip()
+            if text:
+                builder.add(f"[第 {index} 页]\n{text}")
+            if builder.truncated:
+                return builder.build(), True
+
+    return builder.build(), False
+
+
+def _extract_pdf_page_text_with_ocr(page, *, ocr_language, ocr_dpi):
+    text_page = page.get_textpage_ocr(
+        language=ocr_language,
+        dpi=ocr_dpi,
+        full=True,
+    )
+    return page.get_text("text", textpage=text_page, sort=True).strip()
+
+
+def _resolve_pdf_ocr_language(configured_language):
+    language = (configured_language or "").strip()
+    if language and language.lower() != "auto":
+        return language
+
+    available_languages = _get_available_tesseract_languages()
+    if {"chi_sim", "eng"}.issubset(available_languages):
+        return "chi_sim+eng"
+    if "eng" in available_languages:
+        return "eng"
+    if "chi_sim" in available_languages:
+        return "chi_sim"
+    return language or "eng"
+
+
+@lru_cache(maxsize=1)
+def _get_available_tesseract_languages():
+    if not shutil.which("tesseract"):
+        return frozenset()
+
+    try:
+        result = subprocess.run(
+            ["tesseract", "--list-langs"],
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+            errors="ignore",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+
+    languages = {
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and "available languages" not in line.lower()
+    }
+    return frozenset(languages)
+
+
+def _ocr_fallback_is_configured():
+    return bool(os.getenv("TESSDATA_PREFIX") or shutil.which("tesseract"))
 
 
 def _validate_document_stream(file_obj, suffix):

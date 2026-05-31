@@ -24,12 +24,16 @@
 
 ## 后端实现
 
-- `Conversation`：用户会话，按 `owner` 隔离，支持软删除。
+- `Conversation`：用户会话，按 `owner` 隔离，当前 `DELETE /api/conversations/{id}/` 执行硬删除并级联清理关联数据。
 - `Message`：保存用户消息和 AI 回复。
 - `Attachment`：保存上传文件记录，并可绑定到具体 `Message`。
 - `AgentRun`：记录 AI 调用请求、响应、模型、状态和耗时。
+- `KnowledgeDocument`：记录附件索引状态、归属和错误信息。
+- `KnowledgeChunk`：记录切片文本、元数据和向量。
+- `RetrievalLog`：记录每次检索命中的 chunk。
 - `backend/apps/chat/services.py` 调用 `backend/ai/runtime.py`，由 LangGraph 编排模型和工具。
 - 没有正确配置模型环境变量时返回中文 fallback，保证联调闭环可运行。
+- assistant 消息现在会携带 `sources`、`used_chunks`、`is_rag_answer`、`rag_score` 元数据。
 
 ## API 接口
 
@@ -40,6 +44,13 @@
 - `GET /api/conversations/{id}/messages/`
 - `POST /api/chat/send/`
 - `POST /api/files/upload/`
+
+## 2026-05-20 RAG MVP 更新
+
+- 上传 `.docx/.pdf` 后会立即尝试索引，索引失败不影响附件主记录保存。
+- 起始上传若还未绑定会话，附件相关的知识记录先挂在 `owner` 下；发送消息绑定到会话时，会同步回写 `KnowledgeDocument/KnowledgeChunk` 的 `conversation`。
+- 发送消息前会先做当前会话内 top-k 检索，再把来源片段注入模型上下文。
+- 前端 assistant 消息下方新增来源区块，优先展示 `sources`，没有摘要时回退展示 `used_chunks` 片段，并显示本条回复的实际 `rag_score`。
 
 ## 数据隔离规则
 
@@ -86,6 +97,13 @@ Conversation.objects.active().owned_by(request.user)
 - `python manage.py test` 通过，当前 7 个测试
 - `npm run build` 通过
 
+本次 RAG MVP 已验证：
+
+- `python manage.py check` 通过
+- `python manage.py test` 通过
+- `npm run build` 通过
+- 历史消息返回体包含 `sources/used_chunks/is_rag_answer/rag_score`
+
 ## 2026-05-20 更新：上传安全加固
 
 - 上传入口不再只信任扩展名和前端 `content_type`，新增了 PDF 文件头校验与 DOCX ZIP 结构校验。
@@ -96,4 +114,16 @@ Conversation.objects.active().owned_by(request.user)
 ## 后续计划
 
 - 将普通非流式回复升级为 SSE 流式输出。
-- Word/PDF 文件内容读取已接入 Agent 工具；图片、扫描版 PDF 和其他文件格式还未接入 OCR/解析。
+- Word/PDF 文件内容读取已接入 Agent 工具；扫描版 PDF 在环境具备 `tesseract` 时会走 OCR fallback，但图片和其他文件格式仍未接入 OCR/解析。
+- 当前向量存储仍是 SQLite + JSON 持久化向量的 MVP 方案，后续如规模增长再迁移 pgvector。
+
+## 2026-05-20 会话删除更新
+
+- 删除会话现已改为硬删除，对应 `Message`、`Attachment`、`AgentRun`、`KnowledgeDocument`、`KnowledgeChunk`、`RetrievalLog` 会一起清理。
+- 会话关联的上传文件会从 `backend/media/` 同步删除，不再只是在会话列表里隐藏。
+## 2026-05-21 流式回复
+
+- 前端 `chatApi.sendMessageStream()` 现在消费 `POST /api/chat/send-stream/` 的 NDJSON 流，事件顺序是 `start -> delta* -> done`。
+- `ChatPage.js` 在 `start` 事件时替换 optimistic user message，并建立 assistant 占位消息；后续 `delta` 事件持续追加到同一条 assistant 消息。
+- `ChatArea.js` 的自动滚动不再只看 `messages.length`，而是跟踪最后一条消息的内容长度变化；用户仍贴底时会继续追踪 assistant 生成中的文本。
+- 为避免切换到新会话时被后台 `getMessages()` 请求覆盖流式中的增量文本，消息列表刷新会在 `isChatLoading` 结束后再恢复。

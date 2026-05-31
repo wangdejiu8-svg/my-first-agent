@@ -1,6 +1,10 @@
+import json
+import time
+
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
+from django.http import StreamingHttpResponse
 from rest_framework import status
 from rest_framework.exceptions import NotFound
 from rest_framework.parsers import MultiPartParser
@@ -10,21 +14,55 @@ from rest_framework.views import APIView
 
 from ai.document_readers import DocumentReadError, validate_uploaded_document
 
-from .models import Attachment, Conversation, Message
+from .indexing import bind_attachments_to_message, ensure_attachment_knowledge_document
+from .models import AgentRun, Attachment, Conversation, Message
 from .serializers import (
     AttachmentSerializer,
     ConversationSerializer,
     MessageSerializer,
     SendMessageSerializer,
 )
-from .services import generate_assistant_reply
+from .services import AssistantReply, generate_assistant_reply, generate_assistant_reply_stream
 
 
 def get_owned_conversation(user, conversation_id):
     try:
         return Conversation.objects.active().owned_by(user).get(id=conversation_id)
     except Conversation.DoesNotExist as exc:
-        raise NotFound("对话不存在或已被删除。") from exc
+        raise NotFound("Conversation was not found.") from exc
+
+
+def prepare_send_context(*, user, content, conversation_id, attachment_ids):
+    if len(set(attachment_ids)) > settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
+        raise ValueError(
+            "Too many attachments for one message. "
+            f"Max: {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE}."
+        )
+
+    is_new_conversation = not conversation_id
+    if conversation_id:
+        conversation = get_owned_conversation(user, conversation_id)
+    else:
+        conversation = None
+
+    attachments = []
+    if attachment_ids:
+        attachment_queryset = Attachment.objects.filter(
+            id__in=attachment_ids,
+            owner=user,
+            message__isnull=True,
+        )
+        if is_new_conversation:
+            attachment_queryset = attachment_queryset.filter(conversation__isnull=True)
+        else:
+            attachment_queryset = attachment_queryset.filter(
+                Q(conversation__isnull=True) | Q(conversation=conversation)
+            )
+        attachments = list(attachment_queryset)
+        if len(attachments) != len(set(attachment_ids)):
+            raise ValueError("Attachment is invalid, already used, or outside this conversation.")
+
+    return conversation, attachments
 
 
 class ConversationListCreateView(APIView):
@@ -39,7 +77,7 @@ class ConversationListCreateView(APIView):
         return Response(ConversationSerializer(conversations, many=True).data)
 
     def post(self, request):
-        title = request.data.get("title") or "新对话"
+        title = request.data.get("title") or "New conversation"
         conversation = Conversation.objects.create(owner=request.user, title=title[:120])
         return Response(
             ConversationSerializer(conversation).data,
@@ -59,7 +97,7 @@ class ConversationDetailView(APIView):
 
     def delete(self, request, conversation_id):
         conversation = get_owned_conversation(request.user, conversation_id)
-        conversation.soft_delete()
+        conversation.hard_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -82,55 +120,46 @@ class SendMessageView(APIView):
         content = serializer.validated_data["content"].strip()
         conversation_id = serializer.validated_data.get("conversation_id")
         attachment_ids = serializer.validated_data.get("attachment_ids") or []
-        if len(set(attachment_ids)) > settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
-            return Response(
-                {
-                    "detail": (
-                        f"单条消息最多只能附带 "
-                        f"{settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
-        if conversation_id:
-            conversation = get_owned_conversation(request.user, conversation_id)
-        else:
+        try:
+            conversation, attachments = prepare_send_context(
+                user=request.user,
+                content=content,
+                conversation_id=conversation_id,
+                attachment_ids=attachment_ids,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if conversation is None:
             conversation = Conversation.objects.create(
                 owner=request.user,
-                title=content[:60] or "新对话",
+                title=content[:60] or "New conversation",
             )
-
-        attachments = Attachment.objects.none()
-        if attachment_ids:
-            attachments = Attachment.objects.filter(
-                id__in=attachment_ids,
-                owner=request.user,
-                message__isnull=True,
-            ).filter(Q(conversation__isnull=True) | Q(conversation=conversation))
-            if attachments.count() != len(set(attachment_ids)):
-                return Response(
-                    {"detail": "附件不存在、已被使用或不属于当前对话。"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         user_message = Message.objects.create(
             conversation=conversation,
             role=Message.ROLE_USER,
             content=content,
         )
-        if attachment_ids:
-            attachments.update(conversation=conversation, message=user_message)
+        if attachments:
+            bind_attachments_to_message(
+                attachments=attachments,
+                conversation=conversation,
+                message=user_message,
+            )
 
         if conversation.messages.count() == 1:
             conversation.title = content[:60]
             conversation.save(update_fields=["title", "updated_at"])
 
-        assistant_content = generate_assistant_reply(conversation, request.user, content)
+        assistant_reply = generate_assistant_reply(conversation, request.user, content)
+        assistant_content, assistant_metadata = _unwrap_assistant_reply(assistant_reply)
         assistant_message = Message.objects.create(
             conversation=conversation,
             role=Message.ROLE_ASSISTANT,
             content=assistant_content,
+            metadata_json=assistant_metadata,
         )
         conversation.save(update_fields=["updated_at"])
 
@@ -141,6 +170,183 @@ class SendMessageView(APIView):
                 "assistant_message": MessageSerializer(assistant_message).data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class SendMessageStreamView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = SendMessageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        content = serializer.validated_data["content"].strip()
+        conversation_id = serializer.validated_data.get("conversation_id")
+        attachment_ids = serializer.validated_data.get("attachment_ids") or []
+
+        try:
+            conversation, attachments = prepare_send_context(
+                user=request.user,
+                content=content,
+                conversation_id=conversation_id,
+                attachment_ids=attachment_ids,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            if conversation is None:
+                conversation = Conversation.objects.create(
+                    owner=request.user,
+                    title=content[:60] or "New conversation",
+                )
+
+            user_message = Message.objects.create(
+                conversation=conversation,
+                role=Message.ROLE_USER,
+                content=content,
+            )
+            if attachments:
+                bind_attachments_to_message(
+                    attachments=attachments,
+                    conversation=conversation,
+                    message=user_message,
+                )
+
+            if conversation.messages.count() == 1:
+                conversation.title = content[:60]
+                conversation.save(update_fields=["title", "updated_at"])
+
+            assistant_message = Message.objects.create(
+                conversation=conversation,
+                role=Message.ROLE_ASSISTANT,
+                content="",
+                metadata_json={
+                    "sources": [],
+                    "used_chunks": [],
+                    "is_rag_answer": False,
+                    "rag_score": None,
+                    "retrieval_decision": "skip",
+                    "retrieval_reason": "stream_placeholder",
+                    "retrieval_router_label": "",
+                    "retrieval_relatedness": "unrelated",
+                    "retrieval_probe_score": None,
+                    "retrieval_judge_used": False,
+                    "retrieval_decision_version": "placeholder",
+                },
+            )
+            agent_run = AgentRun.objects.create(
+                owner=request.user,
+                conversation=conversation,
+                request=content,
+                response="",
+                model=settings.OPENAI_MODEL,
+                status="streaming",
+                error="",
+                latency_ms=0,
+            )
+            conversation.save(update_fields=["updated_at"])
+
+        response = StreamingHttpResponse(
+            streaming_content=self._stream_reply(
+                conversation=conversation,
+                user=request.user,
+                user_content=content,
+                user_message=user_message,
+                assistant_message=assistant_message,
+                agent_run=agent_run,
+            ),
+            content_type="application/x-ndjson; charset=utf-8",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+    def _stream_reply(self, *, conversation, user, user_content, user_message, assistant_message, agent_run):
+        started_at = time.perf_counter()
+        assistant_reply = AssistantReply(
+            content="",
+            metadata={
+                "sources": [],
+                "used_chunks": [],
+                "is_rag_answer": False,
+                "rag_score": None,
+                "retrieval_decision": "skip",
+                "retrieval_reason": "stream_placeholder",
+                "retrieval_router_label": "",
+                "retrieval_relatedness": "unrelated",
+                "retrieval_probe_score": None,
+                "retrieval_judge_used": False,
+                "retrieval_decision_version": "placeholder",
+            },
+        )
+        reply_chunks = []
+
+        yield _stream_payload(
+            {
+                "type": "start",
+                "conversation": ConversationSerializer(conversation).data,
+                "user_message": MessageSerializer(user_message).data,
+                "assistant_message": MessageSerializer(assistant_message).data,
+            }
+        )
+
+        try:
+            stream = generate_assistant_reply_stream(conversation, user, user_content)
+            while True:
+                try:
+                    chunk = next(stream)
+                except StopIteration as stop:
+                    assistant_reply = stop.value or assistant_reply
+                    break
+                if not chunk:
+                    continue
+                reply_chunks.append(chunk)
+                yield _stream_payload({"type": "delta", "delta": chunk})
+        except Exception as exc:
+            fallback_content = "Message saved, but AI generation failed. Please try again later."
+            assistant_reply = AssistantReply(
+                content=fallback_content,
+                metadata={
+                    "sources": [],
+                    "used_chunks": [],
+                    "is_rag_answer": False,
+                    "rag_score": None,
+                    "retrieval_decision": "skip",
+                    "retrieval_reason": "fallback",
+                    "retrieval_router_label": "",
+                    "retrieval_relatedness": "unrelated",
+                    "retrieval_probe_score": None,
+                    "retrieval_judge_used": False,
+                    "retrieval_decision_version": "fallback",
+                },
+                status="fallback",
+                error=str(exc),
+            )
+            reply_chunks = [fallback_content]
+            yield _stream_payload({"type": "delta", "delta": fallback_content})
+
+        assistant_content, assistant_metadata = _unwrap_assistant_reply(assistant_reply)
+        if not assistant_content and reply_chunks:
+            assistant_content = "".join(reply_chunks)
+
+        assistant_message.content = assistant_content
+        assistant_message.metadata_json = assistant_metadata
+        assistant_message.save(update_fields=["content", "metadata_json"])
+
+        agent_run.response = assistant_content
+        agent_run.status = assistant_reply.status or "completed"
+        agent_run.error = assistant_reply.error or ""
+        agent_run.latency_ms = int((time.perf_counter() - started_at) * 1000)
+        agent_run.save(update_fields=["response", "status", "error", "latency_ms"])
+
+        conversation.save(update_fields=["updated_at"])
+
+        yield _stream_payload(
+            {
+                "type": "done",
+                "conversation": ConversationSerializer(conversation).data,
+                "assistant_message": MessageSerializer(assistant_message).data,
+            }
         )
 
 
@@ -156,13 +362,14 @@ class FileUploadView(APIView):
                 uploaded_files = [single_file]
 
         if not uploaded_files:
-            return Response({"detail": "请选择要上传的文件。"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Missing file."}, status=status.HTTP_400_BAD_REQUEST)
 
         if len(uploaded_files) > settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
             return Response(
                 {
                     "detail": (
-                        f"一次最多上传 {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE} 个文件。"
+                        "Too many files in one upload. "
+                        f"Max: {settings.CHAT_MAX_ATTACHMENTS_PER_MESSAGE}."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -174,11 +381,14 @@ class FileUploadView(APIView):
             conversation = get_owned_conversation(request.user, conversation_id)
 
         attachments = []
+        validated_files = []
         for uploaded_file in uploaded_files:
             original_name, validation_error = self._validate_uploaded_file(uploaded_file)
             if validation_error:
                 return Response({"detail": validation_error}, status=status.HTTP_400_BAD_REQUEST)
+            validated_files.append((uploaded_file, original_name))
 
+        for uploaded_file, original_name in validated_files:
             attachment = Attachment.objects.create(
                 owner=request.user,
                 conversation=conversation,
@@ -188,6 +398,7 @@ class FileUploadView(APIView):
                 size=uploaded_file.size,
             )
             attachments.append(attachment)
+            ensure_attachment_knowledge_document(attachment)
 
         if len(attachments) == 1:
             return Response(AttachmentSerializer(attachments[0]).data, status=status.HTTP_201_CREATED)
@@ -196,7 +407,7 @@ class FileUploadView(APIView):
     def _validate_uploaded_file(self, uploaded_file):
         content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
         if content_type and content_type not in settings.CHAT_ALLOWED_ATTACHMENT_CONTENT_TYPES:
-            return None, "文件类型不被允许。"
+            return None, "File type is not allowed."
 
         try:
             original_name = validate_uploaded_document(
@@ -206,3 +417,15 @@ class FileUploadView(APIView):
         except DocumentReadError as exc:
             return None, str(exc)
         return original_name, None
+
+
+def _unwrap_assistant_reply(reply):
+    if isinstance(reply, AssistantReply):
+        return reply.content, reply.metadata
+    if isinstance(reply, str):
+        return reply, {}
+    return str(reply or ""), {}
+
+
+def _stream_payload(payload):
+    return json.dumps(payload, ensure_ascii=False) + "\n"

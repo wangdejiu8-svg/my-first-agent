@@ -125,6 +125,33 @@ class AuthApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("username", response.data)
 
+    def test_settings_allows_username_that_only_differs_by_case(self):
+        User.objects.create_user(
+            username="anan",
+            email="anan@example.com",
+            password="password123",
+        )
+        renamed_user = User.objects.create_user(
+            username="alice",
+            email="alice@example.com",
+            password="password123",
+        )
+        self.client.post(
+            "/api/auth/login/",
+            {"username": "alice", "password": "password123"},
+            format="json",
+        )
+
+        response = self.client.patch(
+            "/api/settings/",
+            {"username": "Anan"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        renamed_user.refresh_from_db()
+        self.assertEqual(renamed_user.username, "Anan")
+
     def test_logout_revokes_cookie_token(self):
         user = User.objects.create_user(
             username="alice",

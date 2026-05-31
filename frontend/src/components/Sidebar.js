@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import UserAvatar from './UserAvatar';
 import './Sidebar.css';
 
 function Sidebar({
@@ -82,12 +83,19 @@ function Sidebar({
 
   return (
     <motion.div
-      className="sidebar"
-      initial={{ x: -280 }}
-      animate={{ x: 0 }}
-      exit={{ x: -280 }}
-      transition={{ type: 'spring', damping: 25 }}
+      className="sidebar-shell"
+      initial={{ width: 0, opacity: 0, borderRightWidth: 0 }}
+      animate={{ width: 260, opacity: 1, borderRightWidth: 1 }}
+      exit={{ width: 0, opacity: 0, borderRightWidth: 0 }}
+      transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
     >
+      <motion.div
+        className="sidebar"
+        initial={{ x: -24 }}
+        animate={{ x: 0 }}
+        exit={{ x: -24 }}
+        transition={{ duration: 0.12, ease: 'easeOut' }}
+      >
       <div className="sidebar-header">
         <button onClick={handleNewConversation} className="new-conversation-btn">
           + 新建对话
@@ -135,7 +143,7 @@ function Sidebar({
         ) : (
           <div className="user-menu-wrap">
             <button onClick={() => setShowMenu(!showMenu)} className="user-menu-trigger">
-              <div className="user-avatar">{user?.username?.[0]?.toUpperCase() || 'U'}</div>
+              <UserAvatar name={user?.username || user?.email} size="sm" />
               <span>{user?.username || '用户'}</span>
             </button>
             {showMenu && (
@@ -174,6 +182,7 @@ function Sidebar({
           </div>
         </div>
       )}
+      </motion.div>
     </motion.div>
   );
 }

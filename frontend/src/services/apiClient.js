@@ -2,15 +2,7 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:800
 const CSRF_COOKIE_NAME = 'csrftoken';
 
 export async function apiRequest(path, options = {}) {
-  const method = String(options.method || 'GET').toUpperCase();
-  const headers = {
-    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-    ...options.headers,
-  };
-  const csrfToken = shouldSendCsrfToken(method) ? readCookie(CSRF_COOKIE_NAME) : '';
-  if (csrfToken && !headers['X-CSRFToken']) {
-    headers['X-CSRFToken'] = csrfToken;
-  }
+  const { headers } = buildRequestOptions(options);
 
   let response;
   try {
@@ -20,7 +12,7 @@ export async function apiRequest(path, options = {}) {
       headers,
     });
   } catch (error) {
-    throw new Error('无法连接服务器，请确认后端服务已启动');
+    throw new Error('无法连接到服务端，请确认后端服务已启动');
   }
 
   if (response.status === 204) {
@@ -30,12 +22,66 @@ export async function apiRequest(path, options = {}) {
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = normalizeApiError(data, response.status);
-    const error = new Error(detail);
-    error.status = response.status;
-    error.data = data;
-    throw error;
+    const requestError = new Error(detail);
+    requestError.status = response.status;
+    requestError.data = data;
+    throw requestError;
   }
   return data;
+}
+
+export async function apiStreamRequest(path, options = {}) {
+  const { headers } = buildRequestOptions(options);
+  const { onLine, ...requestOptions } = options;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...requestOptions,
+      credentials: 'include',
+      headers,
+    });
+  } catch (error) {
+    throw new Error('无法连接到服务端，请确认后端服务已启动');
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    const detail = normalizeApiError(data, response.status);
+    const requestError = new Error(detail);
+    requestError.status = response.status;
+    requestError.data = data;
+    throw requestError;
+  }
+
+  if (!response.body) {
+    throw new Error('当前浏览器不支持流式回复');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed) {
+        onLine?.(trimmed);
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    onLine?.(buffer.trim());
+  }
 }
 
 function normalizeApiError(data, status) {
@@ -48,7 +94,7 @@ function normalizeApiError(data, status) {
     return '你没有权限执行此操作';
   }
   if (status === 404) return '请求的内容不存在或已被删除';
-  if (status >= 500) return '服务器暂时不可用，请稍后重试';
+  if (status >= 500) return '服务端暂时不可用，请稍后重试';
 
   if (!rawMessage) return '请求失败，请稍后重试';
   return translateKnownError(rawMessage);
@@ -56,6 +102,19 @@ function normalizeApiError(data, status) {
 
 function shouldSendCsrfToken(method) {
   return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method);
+}
+
+function buildRequestOptions(options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const headers = {
+    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    ...options.headers,
+  };
+  const csrfToken = shouldSendCsrfToken(method) ? readCookie(CSRF_COOKIE_NAME) : '';
+  if (csrfToken && !headers['X-CSRFToken']) {
+    headers['X-CSRFToken'] = csrfToken;
+  }
+  return { headers };
 }
 
 function readCookie(name) {

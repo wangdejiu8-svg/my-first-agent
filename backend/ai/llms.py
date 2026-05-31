@@ -2,7 +2,7 @@ from django.conf import settings
 from langchain_openai import ChatOpenAI
 
 
-def get_chat_model():
+def get_chat_model(*, streaming=False):
     if not settings.OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY 未配置。")
 
@@ -11,6 +11,7 @@ def get_chat_model():
         "api_key": settings.OPENAI_API_KEY,
         "temperature": 0.2,
         "max_retries": 2,
+        "streaming": streaming,
     }
     if settings.OPENAI_BASE_URL:
         kwargs["base_url"] = settings.OPENAI_BASE_URL

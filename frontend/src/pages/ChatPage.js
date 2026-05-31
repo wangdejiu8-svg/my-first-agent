@@ -14,6 +14,10 @@ function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [error, setError] = useState('');
+  const [scrollRequestKey, setScrollRequestKey] = useState(0);
+  const requestScrollToBottom = () => {
+    setScrollRequestKey(prev => prev + 1);
+  };
 
   const loadConversations = useCallback(async () => {
     if (!isLoggedIn) {
@@ -38,14 +42,17 @@ function ChatPage() {
       setMessages([]);
       return;
     }
+    if (isChatLoading) {
+      return;
+    }
     chatApi
       .getMessages(activeConversationId)
       .then(setMessages)
       .catch(err => setError(err.message));
-  }, [activeConversationId, isLoggedIn]);
+  }, [activeConversationId, isChatLoading, isLoggedIn]);
 
   const handleNewConversation = async () => {
-    const conversation = await chatApi.createConversation('新对话');
+    const conversation = await chatApi.createConversation('New conversation');
     setConversations(prev => [conversation, ...prev]);
     setActiveConversationId(conversation.id);
     setMessages([]);
@@ -70,12 +77,14 @@ function ChatPage() {
   const handleSendMessage = async (content, files = []) => {
     setError('');
     setIsChatLoading(true);
+
+    const requestId = Date.now();
     const fileNames = files.map(file => file.name);
     const optimisticContent = fileNames.length
-      ? `${content}\n\n附件：${fileNames.join('、')}`
+      ? `${content}\n\nAttachments: ${fileNames.join(', ')}`
       : content;
     const optimisticUserMessage = {
-      id: `local-${Date.now()}`,
+      id: `local-user-${requestId}`,
       role: 'user',
       content: optimisticContent,
       attachments: fileNames.map((name, index) => ({
@@ -84,7 +93,21 @@ function ChatPage() {
         size: files[index].size,
       })),
     };
-    setMessages(prev => [...prev, optimisticUserMessage]);
+    const optimisticAssistantMessage = {
+      id: `local-assistant-${requestId}`,
+      role: 'assistant',
+      content: '',
+      attachments: [],
+      sources: [],
+      used_chunks: [],
+      is_rag_answer: false,
+      rag_score: null,
+    };
+    let streamingAssistantId = optimisticAssistantMessage.id;
+
+    setMessages(prev => [...prev, optimisticUserMessage, optimisticAssistantMessage]);
+    requestScrollToBottom();
+
     try {
       const uploadedAttachments = [];
       for (const file of files) {
@@ -94,24 +117,67 @@ function ChatPage() {
         });
         uploadedAttachments.push(attachment);
       }
-      const data = await chatApi.sendMessage({
+
+      await chatApi.sendMessageStream({
         conversationId: activeConversationId,
         content,
         attachmentIds: uploadedAttachments.map(attachment => attachment.id),
-      });
-      setActiveConversationId(data.conversation.id);
-      setMessages(prev => [
-        ...prev.filter(message => message.id !== optimisticUserMessage.id),
-        data.user_message,
-        data.assistant_message,
-      ]);
-      setConversations(prev => {
-        const withoutCurrent = prev.filter(item => item.id !== data.conversation.id);
-        return [data.conversation, ...withoutCurrent];
+        onEvent: (event) => {
+          if (event?.type === 'start') {
+            streamingAssistantId = event.assistant_message.id;
+            setActiveConversationId(event.conversation.id);
+            setMessages(prev => {
+              const preserved = prev.filter(message => (
+                message.id !== optimisticUserMessage.id
+                && message.id !== optimisticAssistantMessage.id
+                && message.id !== event.user_message.id
+                && message.id !== event.assistant_message.id
+              ));
+              return [...preserved, event.user_message, event.assistant_message];
+            });
+            requestScrollToBottom();
+            return;
+          }
+
+          if (event?.type === 'delta') {
+            setMessages(prev => {
+              const assistantExists = prev.some(message => message.id === streamingAssistantId);
+              if (!assistantExists) {
+                return [
+                  ...prev,
+                  { ...optimisticAssistantMessage, id: streamingAssistantId, content: event.delta || '' },
+                ];
+              }
+              return prev.map(message => (
+                message.id === streamingAssistantId
+                  ? { ...message, content: `${message.content || ''}${event.delta || ''}` }
+                  : message
+              ));
+            });
+            requestScrollToBottom();
+            return;
+          }
+
+          if (event?.type === 'done') {
+            setActiveConversationId(event.conversation.id);
+            setMessages(prev => prev.map(message => (
+              message.id === streamingAssistantId
+                ? event.assistant_message
+                : message
+            )));
+            setConversations(prev => {
+              const withoutCurrent = prev.filter(item => item.id !== event.conversation.id);
+              return [event.conversation, ...withoutCurrent];
+            });
+            requestScrollToBottom();
+          }
+        },
       });
     } catch (err) {
-      setMessages(prev => prev.filter(message => message.id !== optimisticUserMessage.id));
-      setError(err.message || '发送失败');
+      setMessages(prev => prev.filter(message => (
+        message.id !== optimisticUserMessage.id && message.id !== optimisticAssistantMessage.id
+      )));
+      setError(err.message || 'Failed to send message');
       throw err;
     } finally {
       setIsChatLoading(false);
@@ -137,6 +203,9 @@ function ChatPage() {
       <ChatArea
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(!sidebarVisible)}
+        conversationId={activeConversationId}
+        scrollRequestKey={scrollRequestKey}
+        forceStickToBottom={isChatLoading}
         isLoggedIn={isLoggedIn}
         messages={messages}
         error={error}

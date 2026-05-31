@@ -1,6 +1,10 @@
 from langchain_core.tools import tool
 
 from ai.document_readers import is_supported_document, read_document_text
+from ai.retrieval import (
+    get_attachment_chunk_context as retrieve_attachment_chunk_context,
+    search_current_conversation_knowledge,
+)
 from apps.accounts.models import UserSettings
 from apps.chat.models import Attachment, Conversation
 
@@ -49,8 +53,46 @@ def build_tools(user, conversation):
         }
 
     @tool
+    def search_current_conversation_knowledge_tool(query: str, top_k: int = 5):
+        """检索当前会话中与问题最相关的文档片段。"""
+        result = search_current_conversation_knowledge(
+            user=user,
+            conversation=conversation,
+            query=query,
+            top_k=top_k,
+        )
+        return {
+            "sources": result.sources,
+            "used_chunks": result.used_chunks,
+            "is_rag_answer": result.is_rag_answer,
+            "rag_score": result.rag_score,
+        }
+
+    @tool
+    def get_attachment_chunk_context(attachment_id: int, query: str, top_k: int = 5):
+        """检索当前会话内某个附件与问题最相关的片段。"""
+        try:
+            attachment = Attachment.objects.get(
+                id=attachment_id,
+                owner=user,
+                conversation=conversation,
+            )
+        except Attachment.DoesNotExist:
+            return {"error": "附件不存在或不属于当前会话。"}
+
+        return {
+            "used_chunks": retrieve_attachment_chunk_context(
+                user=user,
+                conversation=conversation,
+                attachment=attachment,
+                query=query,
+                top_k=top_k,
+            )
+        }
+
+    @tool
     def read_current_conversation_documents(limit: int = 3):
-        """读取当前会话中最近上传的 Word 或 PDF 附件文本。"""
+        """读取当前会话中最近上传的 Word 或 PDF 附件全文。"""
         limit = min(max(int(limit or 3), 1), 5)
         attachments = (
             Attachment.objects.filter(owner=user, conversation=conversation)
@@ -72,7 +114,7 @@ def build_tools(user, conversation):
 
     @tool
     def read_uploaded_document(attachment_id: int):
-        """按附件 ID 读取当前用户当前会话中的 Word 或 PDF 附件文本。"""
+        """按附件 ID 读取当前会话中的 Word 或 PDF 附件全文。"""
         try:
             attachment = Attachment.objects.get(
                 id=attachment_id,
@@ -89,6 +131,8 @@ def build_tools(user, conversation):
         list_user_conversations,
         get_current_conversation_messages,
         get_user_settings,
+        search_current_conversation_knowledge_tool,
+        get_attachment_chunk_context,
         read_current_conversation_documents,
         read_uploaded_document,
     ]

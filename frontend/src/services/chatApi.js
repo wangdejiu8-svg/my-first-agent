@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { apiRequest, apiStreamRequest } from './apiClient';
 
 export const chatApi = {
   getConversations: () => apiRequest('/conversations/'),
@@ -43,4 +43,24 @@ export const chatApi = {
         attachment_ids: attachmentIds,
       }),
     }),
+
+  sendMessageStream: async ({ conversationId, content, attachmentIds = [], onEvent }) => {
+    await apiStreamRequest('/chat/send-stream/', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        content,
+        attachment_ids: attachmentIds,
+      }),
+      onLine: (line) => {
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch (error) {
+          throw new Error('流式回复解析失败');
+        }
+        onEvent?.(event);
+      },
+    });
+  },
 };

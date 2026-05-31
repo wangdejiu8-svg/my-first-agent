@@ -1,7 +1,9 @@
 # AI 对话应用
+-
+一个基于 React + Django + LangGraph 的 AI 对话应用，提供用户认证、会话持久化、历史对话管理和真实模型调用能力。 
 
-一个基于 React + Django + LangGraph 的 AI 对话应用，提供用户认证、会话持久化、历史对话管理和真实模型调用能力。
-
+## 工作要求
+ -读取完claude.md文件才能开始动手 
 ## 项目概述
 
 本项目是一个面向普通用户的AI对话应用，采用前后端分离架构。
@@ -9,6 +11,7 @@
 - **前端技术栈**：React + HTML5 + CSS3 + JavaScript
 - **后端技术栈**：Django + Django REST Framework + SQLite
 - **AI 编排层**：LangGraph + LangChain OpenAI-compatible client
+- **检索增强层**：文档切片 + embedding + SQLite 持久化向量
 - **模型服务**：支持 DeepSeek 这类 OpenAI-compatible API
 
 ## 功能特性
@@ -19,6 +22,7 @@
 - ✅ 用户认证系统（注册、登录）
 - ✅ 个人设置（信息管理、主题切换、语言选择）
 - ✅ 文件上传功能
+- ✅ 会话内 RAG 检索与来源展示
 - ✅ 沉浸对话模式
 
 ### 页面结构
@@ -71,11 +75,14 @@ my-first-agent/
 │   │   ├── tools/             # Agent 可调用工具
 │   │   ├── graph.py           # StateGraph 定义
 │   │   ├── runtime.py         # 统一运行入口
+│   │   ├── chunking.py        # 文档切片
+│   │   ├── embeddings.py      # embedding 抽象与 fallback
+│   │   ├── retrieval.py       # 会话级检索与来源组装
 │   │   ├── llms.py            # 模型客户端工厂
 │   │   └── prompts.py         # 系统提示词
 │   ├── apps/
 │   │   ├── accounts/          # 认证、用户设置
-│   │   └── chat/              # 会话、消息、AgentRun
+│   │   └── chat/              # 会话、消息、附件、AgentRun、知识索引
 │   ├── config/                # Django 项目配置
 │   └── manage.py
 ├── .memories/                 # 项目记忆文档
@@ -91,6 +98,13 @@ React -> apiClient -> Django REST API -> Token Auth -> SQLite
 ```
 
 Django 仍然是业务数据和权限边界的唯一入口；LangGraph 只负责编排模型、工具和对话上下文。
+
+当前 2.0 MVP 已落地的最小闭环是：
+
+- 上传 `.docx/.pdf` 后自动创建索引记录
+- 文档切片与 embedding 持久化
+- 提问时按当前会话范围检索 chunk
+- assistant 消息返回来源文件和片段摘要
 
 ## 记忆文档模块
 
@@ -162,6 +176,7 @@ Copy-Item .env.example .env
 ✅ 用户认证、设置、会话和消息已持久化到 SQLite
 ✅ 后端已接入 LangGraph 编排层
 ✅ 支持 DeepSeek/OpenAI-compatible 模型配置
+✅ 当前会话内基础 RAG 与来源展示已接入
 ✅ 前后端基础联调已完成
 
 ## 版本信息
@@ -174,3 +189,35 @@ Copy-Item .env.example .env
 - 管理后台收紧了特权账号边界，普通 `staff` 不能再修改或删除管理员账号，也不能改动角色字段。
 - 浏览器登录态现在要求 CSRF 保护，前端已补齐 `X-CSRFToken` 自动注入。
 - Word/PDF 上传增加了服务端格式校验和更稳健的解析失败处理。
+## 2026-05-20 RAG 修复
+
+- 文档检索上下文不再以系统指令注入，上传文件中的文本会被当作非可信参考材料处理。
+- 会话检索现在按 `embedding_backend` 分组执行，避免远端向量和本地 hash 向量混用时静默失效。
+- 历史附件会在升级后回填 `KnowledgeDocument`，并在第一次会话检索时按需补索引。
+
+## 2026-05-20 会话删除更新
+
+- 删除会话现已改为硬删除，对应消息、附件、知识文档、向量分片和检索日志会一起清理。
+- 会话关联的上传文件也会从本地 `media` 目录同步移除，不再只是在界面上隐藏。
+## 2026-05-21 Streaming Reply Update
+
+- Added `POST /api/chat/send-stream/` for incremental AI reply delivery.
+- The frontend now renders assistant content token-by-token and keeps the chat viewport pinned to the latest generated text while the user stays near the bottom.
+
+## 2026-05-25 RAG Retrieval Tuning
+
+- Added a lightweight retrieval gate so obvious greetings and thank-you messages no longer trigger RAG by default.
+- Added `RAG_MIN_SCORE=0.5` to filter weakly related chunks before they become `used_chunks` or visible sources.
+- Tightened short keyword retrieval: `1-4` CJK queries and other very short tokens now require a lexical hit before chunks can appear as visible sources, and exact text/file-name hits are boosted during reranking.
+- Assistant messages now persist the actual per-reply `rag_score` (the best matched chunk score), and the chat UI shows it next to `Sources used`.
+
+## 2026-05-27 OCR Tuning
+
+- The backend PDF OCR fallback now auto-selects `chi_sim+eng` when both language packs are installed, which reduces Chinese garbling on scanned PDFs.
+- OCR extraction now runs at `300 DPI`, uses full-page OCR, and reads text with sorted extraction to reduce layout misordering.
+
+## 2026-05-31 RAG Gate Phase 1
+
+- The backend retrieval decision is no longer a simple yes/no check. It now uses a Phase 1 `skip / retrieve / probe` gate before injecting document context.
+- Obvious small-talk and upload notices are skipped, explicit document questions retrieve immediately, and the remaining “conversation has documents” cases go through a lightweight probe.
+- Probe and final retrieval now reuse the same search execution, which avoids duplicate embedding/scanning work in the same reply.
